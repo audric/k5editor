@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=K5 Editor
+Comment=Edit channels and settings of a Quansheng UV-K5 running F4HWN firmware
+Exec=k5editor %f
+Terminal=false
+Categories=Utility;HamRadio;

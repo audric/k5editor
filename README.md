@@ -1,5 +1,7 @@
 # K5 Editor
 
+[![build](https://github.com/audric/k5editor/actions/workflows/build.yml/badge.svg)](https://github.com/audric/k5editor/actions/workflows/build.yml)
+
 A desktop editor for the memory channels and settings of a Quansheng UV-K5 handheld
 running the **F4HWN v4.3** firmware. C++20 and Qt 6, Linux.
 
@@ -38,6 +40,32 @@ running the **F4HWN v4.3** firmware. C++20 and Qt 6, Linux.
 
 Other firmwares can be read and saved to a file as a backup, but not edited or written.
 
+## Install
+
+Current release: **v0.1.0** ([all releases](https://github.com/audric/k5editor/releases)).
+Packages are built by GitHub for PCs (`amd64`) and for Raspberry Pi (`arm64`, 64-bit
+Raspberry Pi OS). They need Debian 12, Raspberry Pi OS Bookworm, Ubuntu 24.04, or newer.
+
+On a PC:
+
+```sh
+wget https://github.com/audric/k5editor/releases/download/v0.1.0/k5editor_0.1.0_amd64.deb
+sudo apt install ./k5editor_0.1.0_amd64.deb
+```
+
+On a Raspberry Pi:
+
+```sh
+wget https://github.com/audric/k5editor/releases/download/v0.1.0/k5editor_0.1.0_arm64.deb
+sudo apt install ./k5editor_0.1.0_arm64.deb
+```
+
+Then start **K5 Editor** from the applications menu, or run `k5editor`. `apt` installs
+the Qt 6 libraries it needs.
+
+Each release also has a `.tar.gz` per architecture with the same program and no
+installer; it needs the Qt 6 libraries (`libqt6widgets6`) already installed.
+
 ## Build
 
 On Debian or Ubuntu:
@@ -49,6 +77,8 @@ cmake --build build
 ctest --test-dir build        # optional: runs the core tests
 ./build/k5editor
 ```
+
+To make the packages yourself: `cd build && cpack -G "DEB;TGZ"`.
 
 Your user needs access to the serial port, usually by being in the `dialout` group.
 
@@ -79,6 +109,9 @@ including ones a given edition was built without.
 The core (packet format, memory layout, write planning and the write procedure) is
 covered by automated tests that run against a simulated radio. Reading has been checked
 against a real UV-K5 on F4HWN v4.3.
+
+Release packages are built and tested by GitHub on both architectures. The `arm64`
+package has not yet been tried on an actual Raspberry Pi.
 
 Use it at your own risk: it writes to your radio's memory. Keep the first backup it
 makes; that file also contains your radio's calibration.
