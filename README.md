@@ -38,6 +38,20 @@ running the **F4HWN v4.3** firmware. C++20 and Qt 6, Linux.
 
 Other firmwares can be read and saved to a file as a backup, but not edited or written.
 
+## Install
+
+Ready-made packages for PCs (`amd64`) and Raspberry Pi (`arm64`, 64-bit Raspberry Pi OS)
+are on the [releases page](https://github.com/audric/k5editor/releases). They need
+Debian 12, Raspberry Pi OS Bookworm, Ubuntu 24.04, or newer.
+
+```sh
+sudo apt install ./k5editor_0.1.0_arm64.deb     # or the _amd64.deb on a PC
+k5editor
+```
+
+The `.tar.gz` holds the same program without an installer; it needs the Qt 6 libraries
+(`libqt6widgets6`) installed.
+
 ## Build
 
 On Debian or Ubuntu:
