@@ -1,0 +1,7 @@
+# name: Distress
+# note: International distress and safety frequencies, for listening
+name,rx,tx,tx_tone,rx_tone,mode,width,power
+Air emerg,121.50000,,,,AM,Wide,LOW5
+Air SAR,123.10000,,,,AM,Wide,LOW5
+Marine 16,156.80000,,,,FM,Wide,HIGH
+Marine 06,156.30000,,,,FM,Wide,HIGH

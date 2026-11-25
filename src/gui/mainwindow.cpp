@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include "channelmodel.h"
+#include "presets.h"
 #include "serialtransport.h"
 #include "settingspanel.h"
 #include <QAction>
@@ -7,6 +8,8 @@
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QDesktopServices>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
@@ -15,12 +18,15 @@
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QProgressBar>
 #include <QProgressDialog>
 #include <QPushButton>
 #include <QSettings>
+#include <QSpinBox>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QTabWidget>
@@ -110,6 +116,10 @@ void MainWindow::buildUi() {
     m_readAct = bar->addAction(style()->standardIcon(QStyle::SP_ArrowDown), tr("Read from radio"));
     m_writeAct = bar->addAction(style()->standardIcon(QStyle::SP_ArrowUp), tr("Write to radio"));
     bar->addSeparator();
+    auto *newAct = bar->addAction(style()->standardIcon(QStyle::SP_FileIcon), tr("New"));
+    newAct->setToolTip(tr("Start an empty image: no channels, default settings"));
+    newAct->setShortcut(QKeySequence::New);
+    connect(newAct, &QAction::triggered, this, &MainWindow::newFile);
     auto *openAct = bar->addAction(style()->standardIcon(QStyle::SP_DialogOpenButton), tr("Open image…"));
     m_saveAct = bar->addAction(style()->standardIcon(QStyle::SP_DialogSaveButton), tr("Save image as…"));
     bar->addSeparator();
@@ -128,7 +138,7 @@ void MainWindow::buildUi() {
     auto *fileMenu = menuBar()->addMenu(tr("&File"));
     fileMenu->addActions({m_readAct, m_writeAct});
     fileMenu->addSeparator();
-    fileMenu->addActions({openAct, m_saveAct});
+    fileMenu->addActions({newAct, openAct, m_saveAct});
     fileMenu->addSeparator();
     fileMenu->addAction(tr("Open backup folder"), this, [this] {
         QDir().mkpath(backupDir());
@@ -141,6 +151,9 @@ void MainWindow::buildUi() {
     });
     fileMenu->addSeparator();
     fileMenu->addAction(tr("Quit"), QKeySequence::Quit, this, &QWidget::close);
+    auto *channelsMenu = menuBar()->addMenu(tr("&Channels"));
+    m_importAct = channelsMenu->addAction(tr("Add ready-made channel lists…"), this, [this] { importPresets(); });
+    m_importAct->setToolTip(tr("CB, marine VHF, PMR446, LPD433, Freenet, Italian airports and repeaters, and more"));
 
     // ---- channels tab
     auto *channelsPage = new QWidget;
@@ -187,9 +200,14 @@ void MainWindow::buildUi() {
     fixButton->addAction(m_fixAct);
     fixButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
 
+    auto *importButton = new QPushButton(tr("Add channel lists…"));
+    importButton->setToolTip(m_importAct->toolTip());
+    connect(importButton, &QPushButton::clicked, this, [this] { importPresets(); });
+
     auto *filterRow = new QHBoxLayout;
     filterRow->addWidget(filterEdit, 1);
     filterRow->addWidget(hideEmpty);
+    filterRow->addWidget(importButton);
     filterRow->addWidget(fixButton);
     auto *channelsLayout = new QVBoxLayout(channelsPage);
     channelsLayout->addLayout(filterRow);
@@ -263,6 +281,7 @@ void MainWindow::updateState() {
     m_saveAct->setEnabled(have);
     m_revertAct->setEnabled(have && isDirty());
     m_tabs->setEnabled(have && known);
+    m_importAct->setEnabled(have && known);
 
     const int markers = have ? m_model->bandMarkerProblemCount() : 0;
     m_fixAct->setText(tr("Fix %1").arg(counted(markers, "band marker", "band markers")));
@@ -278,7 +297,7 @@ void MainWindow::updateState() {
         const int problems = m_model->problemCount();
         if (problems) parts << tr("%1 flagged").arg(counted(problems, "channel", "channels"));
     } else if (port) {
-        parts << tr("Read from the radio or open an image file to begin.");
+        parts << tr("Read from the radio, open an image file or start a new one to begin.");
     }
     m_status->setText(parts.join(QStringLiteral("   •   ")));
     setWindowTitle(have ? tr("%1%2 — K5 Editor").arg(m_source, isDirty() ? QStringLiteral(" *") : QString()) : tr("K5 Editor"));
@@ -458,6 +477,14 @@ bool MainWindow::openFile(const QString &path) {
     return true;
 }
 
+void MainWindow::newFile() {
+    if (!confirmDiscard()) return;
+    m_fromRadio = false;
+    setImage(k5::blankImage(), QString(), tr("New image"));
+    notify(tr("New, empty image: no channels, default settings. Writing it to a radio replaces all the radio's channels and "
+              "settings with the ones shown here. Calibration is never written."));
+}
+
 void MainWindow::openFileDialog() {
     if (!confirmDiscard()) return;
     const QString path = QFileDialog::getOpenFileName(this, tr("Open image"), QSettings().value("lastDir").toString(),
@@ -540,4 +567,186 @@ void MainWindow::moveChannels(int delta) {
 void MainWindow::fixBandMarkers() {
     const int n = m_model->fixBandMarkers();
     notify(tr("Corrected the band marker of %1. Write to the radio to apply.").arg(counted(n, "channel", "channels")));
+}
+
+QString MainWindow::userListsDir() {
+    return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/k5editor/lists");
+}
+
+void MainWindow::importPresets(const QStringList &preselect) {
+    if (m_work.size() != k5::MemSize || (m_fromRadio && !k5::firmwareSupported(m_firmware))) return;
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Add ready-made channel lists"));
+    dialog.resize(680, 640);
+
+    auto *list = new QListWidget;
+    auto addItem = [list](const k5::PresetGroup &g, bool checked) {
+        auto *item = new QListWidgetItem(tr("%1  —  %2").arg(g.name, counted(int(g.channels.size()), "channel", "channels")));
+        item->setToolTip(g.note);
+        item->setData(Qt::UserRole, g.id);
+        item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsUserCheckable | Qt::ItemIsSelectable);
+        item->setCheckState(checked ? Qt::Checked : Qt::Unchecked);
+        list->addItem(item);
+    };
+    for (const k5::PresetGroup &g : k5::presetGroups()) addItem(g, preselect.contains(g.id) || preselect.contains(QStringLiteral("all")));
+    auto *openFolder = new QPushButton(tr("Open my lists folder"));
+    openFolder->setToolTip(tr("Your own lists live in %1 as CSV files. A file named like a shipped list replaces it.").arg(userListsDir()));
+    auto *reload = new QPushButton(tr("Reload"));
+    reload->setToolTip(tr("Read the list files again after you change them"));
+    auto *fileProblems = new QPushButton;
+    fileProblems->setFlat(true);
+    auto showFileProblems = [fileProblems] {
+        const int n = int(k5::presetProblems().size());
+        fileProblems->setVisible(n > 0);
+        fileProblems->setText(tr("%1 in the list files…").arg(counted(n, "problem", "problems")));
+    };
+    showFileProblems();
+    connect(fileProblems, &QPushButton::clicked, &dialog, [&dialog] {
+        QMessageBox box(QMessageBox::Information, tr("List files"), tr("Some rows of the list files were left out or changed."), QMessageBox::Ok, &dialog);
+        box.setDetailedText(k5::presetProblems().join(QLatin1Char('\n')));
+        box.exec();
+    });
+    connect(openFolder, &QPushButton::clicked, &dialog, [this] {
+        const QDir dir(userListsDir());
+        dir.mkpath(QStringLiteral("."));
+        const QString shipped = k5::presetDirs().value(0);
+        if (!QFile::exists(dir.filePath("README.md")) && QFile::exists(shipped + "/README.md")) QFile::copy(shipped + "/README.md", dir.filePath("README.md"));
+        QFile where(dir.filePath("SHIPPED-LISTS.txt"));
+        if (where.open(QIODevice::WriteOnly)) where.write(tr("The lists that come with the program are in:\n%1\nCopy one here to change it. See README.md for the format.\n").arg(shipped).toUtf8());
+        if (!QDesktopServices::openUrl(QUrl::fromLocalFile(dir.absolutePath()))) notify(tr("Your lists folder is %1").arg(dir.absolutePath()));
+    });
+    auto *note = new QLabel;
+    note->setWordWrap(true);
+    note->setMinimumHeight(note->fontMetrics().lineSpacing() * 2);
+
+    int firstFree = 0;
+    while (firstFree < k5::ChannelCount - 1 && !k5::decodeChannel(m_work, firstFree).empty) ++firstFree;
+    auto *start = new QSpinBox;
+    start->setRange(1, k5::ChannelCount);
+    start->setValue(firstFree + 1);
+    auto *scanList = new QComboBox;
+    scanList->addItems({tr("no scan list"), tr("scan list 1"), tr("scan list 2"), tr("scan list 3")});
+    auto *airLock = new QCheckBox(tr("Switch on TX lock for the 118–137 MHz channels, so the radio never transmits on them"));
+    airLock->setChecked(true);
+    auto *summary = new QLabel;
+    auto *room = new QProgressBar;
+    room->setTextVisible(true);
+    auto *warning = new QLabel;
+    warning->setWordWrap(true);
+    warning->setStyleSheet(QStringLiteral("color: #c0392b; font-weight: bold;"));
+    auto *legal = new QLabel(tr("Channels are added with transmit switched on at the listed frequency. Transmitting on many of "
+                                "these bands needs a licence or an approved radio; check what applies where you are."));
+    legal->setWordWrap(true);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel);
+    QPushButton *addButton = buttons->addButton(tr("Add"), QDialogButtonBox::AcceptRole);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+    auto chosen = [&] {
+        QList<const k5::PresetGroup *> groups;
+        for (int i = 0; i < list->count(); ++i)
+            if (list->item(i)->checkState() == Qt::Checked)
+                if (const k5::PresetGroup *g = k5::findPresetGroup(list->item(i)->data(Qt::UserRole).toString())) groups << g;
+        return groups;
+    };
+    auto refresh = [&] {
+        int wanted = 0;
+        bool air = false;
+        for (const k5::PresetGroup *g : chosen()) {
+            wanted += int(g->channels.size());
+            air = air || k5::presetUsesAirband(*g);
+        }
+        const int freeAll = k5::freeSlotsFrom(m_work, 0);
+        const int free = k5::freeSlotsFrom(m_work, start->value() - 1);
+        const bool fits = wanted <= free;
+
+        // the bar shows the radio's channel memory: what is used now plus what is ticked
+        room->setRange(0, k5::ChannelCount);
+        room->setValue(qMin(k5::ChannelCount, k5::ChannelCount - freeAll + wanted));
+        room->setFormat(tr("%1 in use + %2 selected of %3").arg(k5::ChannelCount - freeAll).arg(wanted).arg(k5::ChannelCount));
+        room->setStyleSheet(fits ? QString() : QStringLiteral("QProgressBar { text-align: center; } QProgressBar::chunk { background: #c0392b; }"));
+
+        QStringList lines, warnings;
+        QString channelLine = tr("Channels: %1 selected, %2 free").arg(wanted).arg(free);
+        if (start->value() > 1 && free != freeAll) channelLine += tr(" from slot %1 on (%2 free in all)").arg(start->value()).arg(freeAll);
+        if (fits && wanted) channelLine += tr(", %1 left afterwards").arg(free - wanted);
+        lines << channelLine;
+        if (!fits) warnings << tr("Not enough room: %1 too many. Untick some lists%2.").arg(counted(wanted - free, "channel", "channels"),
+                                                                                       free != freeAll ? tr(" or start at a lower slot") : QString());
+        if (wanted == 0) lines << tr("Tick the lists to add. Channels already in the radio are not touched.");
+        summary->setText(lines.join(QLatin1Char('\n')));
+        warning->setText(warnings.join(QLatin1Char('\n')));
+        warning->setVisible(!warnings.isEmpty());
+        addButton->setEnabled(wanted > 0 && fits);
+        airLock->setVisible(air);
+    };
+    connect(list, &QListWidget::itemChanged, &dialog, refresh);
+    connect(start, &QSpinBox::valueChanged, &dialog, refresh);
+    connect(list, &QListWidget::currentItemChanged, &dialog, [note](QListWidgetItem *item) { note->setText(item ? item->toolTip() : QString()); });
+    list->setCurrentRow(0);
+    refresh();
+    connect(reload, &QPushButton::clicked, &dialog, [&] {
+        k5::setPresetDirs(k5::presetDirs());
+        list->clear();
+        for (const k5::PresetGroup &g : k5::presetGroups()) addItem(g, false);
+        list->setCurrentRow(0);
+        showFileProblems();
+        refresh();
+    });
+
+    auto *row = new QHBoxLayout;
+    row->addWidget(new QLabel(tr("Start at slot")));
+    row->addWidget(start);
+    row->addSpacing(16);
+    row->addWidget(new QLabel(tr("Put them in")));
+    row->addWidget(scanList);
+    row->addStretch(1);
+    auto *folderRow = new QHBoxLayout;
+    folderRow->addWidget(openFolder);
+    folderRow->addWidget(reload);
+    folderRow->addWidget(fileProblems);
+    folderRow->addStretch(1);
+    auto *layout = new QVBoxLayout(&dialog);
+    layout->addWidget(list, 1);
+    layout->addWidget(note);
+    layout->addLayout(folderRow);
+    layout->addLayout(row);
+    layout->addWidget(airLock);
+    layout->addWidget(room);
+    layout->addWidget(summary);
+    layout->addWidget(warning);
+    layout->addWidget(legal);
+    layout->addWidget(buttons);
+
+    if (dialog.exec() != QDialog::Accepted) return;
+    QByteArray image = m_work;      // all lists or none
+    k5::ImportOptions options;
+    options.firstSlot = start->value() - 1;
+    options.scanList = scanList->currentIndex();
+    options.lockAirband = airLock->isChecked();
+    int added = 0, first = -1;
+    bool air = false;
+    QStringList names;
+    for (const k5::PresetGroup *g : chosen()) {
+        const k5::ImportResult r = k5::importPreset(image, *g, options);
+        if (!r.ok) {
+            notify(tr("Nothing was added. %1").arg(r.error), true);
+            return;
+        }
+        added += int(r.placed.size());
+        if (first < 0) first = r.placed.first();
+        names << g->name;
+        air = air || k5::presetUsesAirband(*g);
+    }
+    QString lockNote;
+    if (air) lockNote = options.lockAirband ? tr(" The 118–137 MHz channels have TX lock on.") : tr(" Do not transmit on the air band channels.");
+    m_work = image;
+    m_model->reload();
+    updateState();
+    if (first >= 0) {
+        const QModelIndex at = m_filter->mapFromSource(m_model->index(first, ChannelModel::Name));
+        if (at.isValid()) m_table->scrollTo(at, QAbstractItemView::PositionAtTop);
+    }
+    notify(tr("Added %1 (%2), starting at slot %3. They are on the radio only after you write.")
+               .arg(counted(added, "channel", "channels"), names.join(QStringLiteral(", "))).arg(first + 1) + lockNote);
 }

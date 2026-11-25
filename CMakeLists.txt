@@ -11,10 +11,12 @@ endif()
 add_compile_options(-Wall -Wextra)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets Test)
+include(GNUInstallDirs)
 
 add_library(k5core STATIC
   src/core/protocol.cpp src/core/protocol.h
-  src/core/f4hwn.cpp src/core/f4hwn.h
+  src/core/f4hwn.cpp src/core/f4hwn.h src/core/defaults.inc
+  src/core/presets.cpp src/core/presets.h
   src/core/sync.cpp src/core/sync.h
   src/core/serialtransport.cpp src/core/serialtransport.h)
 target_include_directories(k5core PUBLIC src/core)
@@ -26,17 +28,20 @@ add_executable(k5editor
   src/gui/settingspanel.cpp src/gui/settingspanel.h
   src/gui/mainwindow.cpp src/gui/mainwindow.h)
 target_link_libraries(k5editor PRIVATE k5core Qt6::Widgets)
+target_compile_definitions(k5editor PRIVATE
+  K5_LISTS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/lists" K5_LISTS_INSTALL_DIR="${CMAKE_INSTALL_DATADIR}/k5editor/lists")
 
 enable_testing()
 add_executable(test_core tests/test_core.cpp tests/fakeradio.h)
 target_link_libraries(test_core PRIVATE k5core Qt6::Test)
-target_compile_definitions(test_core PRIVATE FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
+target_compile_definitions(test_core PRIVATE FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
+  K5_LISTS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/lists")
 add_test(NAME core COMMAND test_core)
 
 # ---- install and packages (cpack -G "DEB;TGZ")
-include(GNUInstallDirs)
 install(TARGETS k5editor RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES packaging/k5editor.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+install(DIRECTORY lists/ DESTINATION ${CMAKE_INSTALL_DATADIR}/k5editor/lists)
 install(FILES README.md LICENSE DESTINATION ${CMAKE_INSTALL_DOCDIR})
 
 find_program(DPKG dpkg)

@@ -13,6 +13,9 @@ constexpr int MemSize = 0x2000;
 constexpr int ChannelCount = 200;
 
 bool firmwareSupported(const QString &firmware);
+// An image with no channels and the settings of defaults.inc. Everything else is
+// erased (FF), and the firmware uses its own default for what is not set.
+QByteArray blankImage();
 
 struct Channel {
     bool empty = true;

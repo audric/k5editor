@@ -33,6 +33,16 @@ QString mhz(quint32 freq10Hz) { return QString::number(freq10Hz / 100000.0, 'f',
 
 bool firmwareSupported(const QString &firmware) { return firmware.startsWith(QLatin1String("F4HWN v4.3")); }
 
+QByteArray blankImage() {
+    static const struct { const char *id; QVariant value; } defaults[] = {
+#include "defaults.inc"
+    };
+    QByteArray image(MemSize, '\xff');
+    for (const auto &d : defaults)
+        if (!setSettingValue(image, QLatin1String(d.id), d.value)) qFatal("defaults.inc: bad value for %s", d.id);
+    return image;
+}
+
 // ---------------------------------------------------------------- tables
 
 const QList<double> &ctcssTones() {

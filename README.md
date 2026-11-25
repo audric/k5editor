@@ -14,8 +14,20 @@ running the **F4HWN v4.3** firmware. C++20 and Qt 6, Linux.
   mode, width, power, step, the three scan lists and the other per-channel options.
 - Edits the radio's settings, grouped as Radio, Display and sound, Keys and lock,
   Scanning, DTMF and Unlock.
+- Adds ready-made channel lists into empty slots, optionally into one of the scan lists:
+  CB 27 MHz (FM and AM), marine VHF, PMR446, LPD433, Freenet, Italian 43 MHz, KDR444,
+  FRS/GMRS, MURS, NOAA weather, amateur calling frequencies, distress frequencies and
+  the tower, approach, ground and ATIS frequencies of Italian airports (three lists:
+  north, centre, south and islands; data from [OurAirports](https://ourairports.com/data/),
+  public domain). Air band channels are added with TX lock on.
+- Adds Italian amateur FM repeaters, one list per region (2 m and 70 cm, with shift and
+  access tone), and the amateur FM satellites and ISS with Doppler steps.
+- The lists are plain CSV files in [`lists/`](lists/README.md). Keep your own in
+  `~/.local/share/k5editor/lists/` (*Open my lists folder* in the dialog): a new file adds
+  a list, a file named like a shipped one replaces it.
 - Flags channels whose stored data looks damaged or was left by another firmware.
-- Opens and saves 8 KiB memory images.
+- Opens and saves 8 KiB memory images, and starts new ones with no channels and default
+  settings (*File → New*).
 
 ## How it protects the radio
 
@@ -86,6 +98,8 @@ Your user needs access to the serial port, usually by being in the `dialout` gro
 
 1. Connect the programming cable, switch the radio on, and press **Read from radio**.
 2. Edit channels (double-click a cell) and settings. Changed values are shown in bold.
+   **Add channel lists…** fills empty slots from the ready-made lists; the radio holds
+   200 channels, so pick the lists you need.
 3. Press **Write to radio**. The program lists the changes and asks before sending them.
 
 Backups go to `~/.local/share/k5editor/backups`; change that under

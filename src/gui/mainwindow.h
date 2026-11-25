@@ -39,6 +39,9 @@ public:
     MainWindow();
     bool openFile(const QString &path);
     void showTab(int index);   // used by the screenshot option
+    void newFile();            // empty image: no channels, default settings
+    void importPresets(const QStringList &preselect = {});
+    static QString userListsDir();   // where the user keeps their own channel lists
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -80,6 +83,6 @@ private:
     QComboBox *m_ports = nullptr;
     QLabel *m_banner = nullptr;
     QLabel *m_status = nullptr;
-    QAction *m_readAct = nullptr, *m_writeAct = nullptr, *m_saveAct = nullptr, *m_revertAct = nullptr, *m_fixAct = nullptr;
+    QAction *m_readAct = nullptr, *m_writeAct = nullptr, *m_saveAct = nullptr, *m_revertAct = nullptr, *m_fixAct = nullptr, *m_importAct = nullptr;
     QWidget *m_tabs = nullptr;
 };

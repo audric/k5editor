@@ -1,5 +1,6 @@
 #include "f4hwn.h"
 #include "fakeradio.h"
+#include "presets.h"
 #include "protocol.h"
 #include "sync.h"
 #include <QDir>
@@ -24,6 +25,8 @@ static int slotByName(const QByteArray &img, const QString &name) {
 class TestCore : public QObject {
     Q_OBJECT
 private slots:
+    void initTestCase() { setPresetDirs({QStringLiteral(K5_LISTS_SOURCE_DIR)}); }
+
     // ---- packets (expected bytes produced by an independent script that was proven against a real radio)
     void helloPacketMatchesKnownBytes() {
         QCOMPARE(buildPacket(helloCommand()), hex("abcd0800026910e644a85a24b9a9dcba"));
@@ -198,6 +201,335 @@ private slots:
         }
         int type, code;
         QVERIFY(!parseTone("99.9", type, code));
+    }
+
+    void blankImageIsEmptyAndTakesChannels() {
+        QByteArray img = blankImage();
+        QCOMPARE(img.size(), MemSize);
+        for (int i = 0; i < ChannelCount; ++i) {
+            QVERIFY(decodeChannel(img, i).empty);
+            QVERIFY(channelProblems(img, i).isEmpty());
+        }
+        QCOMPARE(freeSlotsFrom(img, 0), ChannelCount);
+        // default settings, and nothing else: no password, no calibration
+        QCOMPARE(settingValue(img, "squelch").toInt(), 1);
+        QCOMPARE(settingValue(img, "logo1").toString(), QString("QUANSHENG"));
+        QCOMPARE(settingValue(img, "logo2").toString(), QString("UV-K5"));
+        QCOMPARE(findSetting("int_flock")->options.at(settingValue(img, "int_flock").toInt()), QString("DEFAULT+ (137-174, 400-470)"));
+        QCOMPARE(findSetting("tot")->options.at(settingValue(img, "tot").toInt()), QString("1 min"));
+        for (const char *id : {"sl1PriorCh1", "sl1PriorCh2", "sl2PriorCh1", "sl2PriorCh2", "sl3PriorCh1", "sl3PriorCh2"})
+            QCOMPARE(settingValue(img, id).toInt(), 0);                  // no channels to point at
+        int set = 0;
+        for (const Setting &s : settings()) {
+            const QVariant v = settingValue(img, s.id);
+            QVERIFY2(v.isValid(), qPrintable(s.id));
+            QByteArray again = img;
+            if (s.kind != Setting::List || v.toInt() >= 0) set += setSettingValue(again, s.id, v) && again == img;     // stored as the program writes it
+        }
+        QVERIFY(set >= 70);
+        QCOMPARE(img.mid(0x0e98, 8), QByteArray(8, '\xff'));
+        QCOMPARE(img.mid(0x0c80, 0x0d60 - 0x0c80), QByteArray(0x0d60 - 0x0c80, '\xff'));     // VFOs
+        QCOMPARE(img.mid(0x1c00, 0x1ff0 - 0x1c00), QByteArray(0x1ff0 - 0x1c00, '\xff'));     // DTMF contacts, calibration
+        QVERIFY(planWrites(img, img).isEmpty());
+        const ImportResult r = importPreset(img, *findPresetGroup("pmr446"), {});
+        QVERIFY(r.ok);
+        QCOMPARE(r.placed.first(), 0);
+        QCOMPARE(decodeChannel(img, 15).name, QString("PMR 16"));
+        QVERIFY(channelProblems(img, 15).isEmpty());
+    }
+
+    // ---- preset channel lists
+    void presetGroupsAreWellFormed() {
+        QStringList ids;
+        for (const PresetGroup &g : presetGroups()) {
+            QVERIFY2(!ids.contains(g.id), qPrintable(g.id));
+            ids << g.id;
+            QVERIFY2(!g.channels.isEmpty() && g.channels.size() <= ChannelCount, qPrintable(g.id));
+            QVERIFY2(!g.name.isEmpty() && !g.note.isEmpty(), qPrintable(g.id));
+            QByteArray img(MemSize, '\xff');
+            QStringList names;
+            QList<QPair<quint32, int>> seen;
+            for (int i = 0; i < g.channels.size(); ++i) {
+                const Channel &c = g.channels.at(i);
+                encodeChannel(img, i, c);
+                QVERIFY2(decodeChannel(img, i) == c, qPrintable(c.name));   // name fits, values storable
+                QVERIFY2(channelProblems(img, i).isEmpty(), qPrintable(c.name));
+                QVERIFY2(bandForFrequency(txFrequency(c)) >= 0, qPrintable(c.name));
+                QVERIFY2(!c.name.isEmpty() && !names.contains(c.name), qPrintable(c.name));
+                names << c.name;
+                // repeaters of a region and satellite Doppler steps share frequencies; elsewhere a repeat is a mistake
+                QVERIFY2(g.id.startsWith("rpt_it_") || g.id == "satellites" || !seen.contains({c.freq, c.modulation}), qPrintable(c.name));
+                seen.append({c.freq, c.modulation});
+            }
+        }
+        for (const char *id : {"cb_fm", "cb_am", "marine", "pmr446", "lpd433", "freenet"}) QVERIFY2(findPresetGroup(id), id);
+        QVERIFY(!findPresetGroup("nope"));
+    }
+    void presetFrequencies() {
+        auto ch = [](const char *group, const QString &name) {
+            for (const Channel &c : findPresetGroup(group)->channels)
+                if (c.name == name) return c;
+            qFatal("no channel %s", qPrintable(name));
+            return Channel{};
+        };
+        auto rx = [&](const char *g, const char *n) { return ch(g, n).freq; };
+        auto tx = [&](const char *g, const char *n) { return txFrequency(ch(g, n)); };
+        QCOMPARE(findPresetGroup("cb_fm")->channels.size(), 40);
+        QCOMPARE(rx("cb_fm", "CB 01 FM"), 2696500u);
+        QCOMPARE(rx("cb_fm", "CB 09 FM"), 2706500u);
+        QCOMPARE(rx("cb_fm", "CB 19 FM"), 2718500u);
+        QCOMPARE(rx("cb_fm", "CB 23 FM"), 2725500u);
+        QCOMPARE(rx("cb_fm", "CB 24 FM"), 2723500u);
+        QCOMPARE(rx("cb_fm", "CB 40 FM"), 2740500u);
+        QCOMPARE(modulationNames().at(ch("cb_am", "CB 09 AM").modulation), QString("AM"));
+        QCOMPARE(rx("cb_am", "CB 09 AM"), 2706500u);
+
+        QCOMPARE(findPresetGroup("marine")->channels.size(), 56);          // 1-28 and 60-88 without 70
+        QCOMPARE(rx("marine", "Marine 16"), 15680000u);
+        QCOMPARE(tx("marine", "Marine 16"), 15680000u);
+        QCOMPARE(ch("marine", "Marine 16").shift, 0);
+        QCOMPARE(rx("marine", "Marine 01"), 16065000u);                    // ship side: listens to the coast station
+        QCOMPARE(tx("marine", "Marine 01"), 15605000u);
+        QCOMPARE(ch("marine", "Marine 01").shift, 2);
+        QCOMPARE(ch("marine", "Marine 01").offset, 460000u);
+        QCOMPARE(tx("marine", "Marine 28"), 15740000u);
+        QCOMPARE(rx("marine", "Marine 28"), 16200000u);
+        QCOMPARE(rx("marine", "Marine 88"), 15742500u);
+        for (const Channel &c : findPresetGroup("marine")->channels) QVERIFY(c.name != "Marine 70");
+        QCOMPARE(powerNames().at(ch("marine", "Marine 75").power), QString("LOW5"));
+
+        QCOMPARE(findPresetGroup("pmr446")->channels.size(), 16);
+        QCOMPARE(rx("pmr446", "PMR 01"), 44600625u);
+        QCOMPARE(rx("pmr446", "PMR 16"), 44619375u);
+        QCOMPARE(ch("pmr446", "PMR 01").narrow, true);
+        QCOMPARE(powerNames().at(ch("pmr446", "PMR 01").power), QString("LOW4"));     // 0.5 W
+        QCOMPARE(findPresetGroup("lpd433")->channels.size(), 69);
+        QCOMPARE(rx("lpd433", "LPD 01"), 43307500u);
+        QCOMPARE(rx("lpd433", "LPD 69"), 43477500u);
+        QCOMPARE(powerNames().at(ch("lpd433", "LPD 01").power), QString("LOW1"));     // the lowest the radio has
+        QCOMPARE(findPresetGroup("freenet")->channels.size(), 6);
+        QCOMPARE(rx("freenet", "Freenet 1"), 14902500u);
+        QCOMPARE(rx("freenet", "Freenet 6"), 14911250u);
+        QCOMPARE(rx("cb43", "43MHz 01"), 4330000u);
+        QCOMPARE(rx("frs_gmrs", "FRS 01"), 46256250u);
+        QCOMPARE(rx("noaa", "NOAA WX1"), 16255000u);
+        QCOMPARE(rx("ham", "2m FM"), 14550000u);
+        QCOMPARE(modulationNames().at(ch("ham", "2m SSB").modulation), QString("USB"));
+    }
+    void shippedListFilesAreClean() {
+        QVERIFY2(presetProblems().isEmpty(), qPrintable(presetProblems().join("\n")));
+        QVERIFY(presetGroups().size() >= 30);
+        QCOMPARE(presetGroups().first().id, QString("cb_fm"));          // the number prefix sets the order
+        for (const PresetGroup &g : presetGroups()) {                    // every list survives being written and read back
+            const PresetFile again = parsePresetCsv(presetCsv(g).toUtf8(), g.id);
+            QVERIFY2(again.problems.isEmpty(), qPrintable(g.id));
+            QCOMPARE(again.group.name, g.name);
+            QCOMPARE(again.group.note, g.note);
+            QVERIFY2(again.group.channels == g.channels, qPrintable(g.id));
+        }
+        const PresetGroup *sat = findPresetGroup("satellites");
+        QVERIFY(sat);
+        for (const Channel &c : sat->channels) {                         // amateur satellite segments only
+            for (quint32 f : {c.freq, txFrequency(c)})
+                QVERIFY2((f >= 14580000 && f <= 14600000) || (f >= 43500000 && f <= 43800000), qPrintable(c.name));
+        }
+    }
+    void listFileFormat() {
+        QCOMPARE(presetIdFromFileName("04-pmr446.csv"), QString("pmr446"));
+        QCOMPARE(presetIdFromFileName("/x/My List.CSV"), QString("my list"));
+        const PresetFile f = parsePresetCsv(
+            "# name: Mine\n# note: my own\n# anything else is a comment\n\n"
+            "Name;RX;TX;tx_tone;width;extra\n"
+            "Home;145,500;;;narrow;x\n"
+            "\"Rpt; nord\";145.6;145.0;88.5;;\n"
+            "DCS one;433.5;;D023N;;\n"
+            "Up;430.1;435.1;;;\n", "mine");
+        QVERIFY2(f.problems.isEmpty(), qPrintable(f.problems.join("\n")));
+        QCOMPARE(f.group.id, QString("mine"));
+        QCOMPARE(f.group.name, QString("Mine"));
+        QCOMPARE(f.group.note, QString("my own"));
+        QCOMPARE(f.group.channels.size(), 4);
+        const Channel a = f.group.channels.at(0), b = f.group.channels.at(1), up = f.group.channels.at(3);
+        QCOMPARE(a.name, QString("Home"));
+        QCOMPARE(a.freq, 14550000u);
+        QCOMPARE(a.shift, 0);
+        QCOMPARE(a.offset, 0u);
+        QCOMPARE(a.narrow, true);
+        QCOMPARE(modulationNames().at(a.modulation), QString("FM"));     // defaults
+        QCOMPARE(powerNames().at(a.power), QString("LOW5"));
+        QCOMPARE(stepsKHz().at(a.step), 12.5);
+        QCOMPARE(a.scanLists, 0);
+        QCOMPARE(b.name, QString("Rpt; nord"));
+        QCOMPARE(b.shift, 2);
+        QCOMPARE(b.offset, 60000u);
+        QCOMPARE(txFrequency(b), 14500000u);
+        QCOMPARE(toneText(b.txToneType, b.txToneCode), QString("88.5"));
+        QCOMPARE(b.rxToneType, 0);
+        QCOMPARE(b.narrow, false);
+        QCOMPARE(toneText(f.group.channels.at(2).txToneType, f.group.channels.at(2).txToneCode), QString("D023N"));
+        QCOMPARE(up.shift, 1);
+        QCOMPARE(up.offset, 500000u);
+        QCOMPARE(txFrequency(up), 43510000u);
+    }
+    void listsFromTheOtherProgramCanBeUsed() {
+        // rt860cps writes SSB, Low and High
+        const PresetFile f = parsePresetCsv("name,rx,mode,power\nA,144.3,SSB,High\nB,446.00625,fm,Low\nC,145.5,AM,low3\nD,145.5,,Mid\n", "x");
+        QVERIFY2(f.problems.isEmpty(), qPrintable(f.problems.join("\n")));
+        QCOMPARE(modulationNames().at(f.group.channels.at(0).modulation), QString("USB"));
+        QCOMPARE(powerNames().at(f.group.channels.at(0).power), QString("HIGH"));
+        QCOMPARE(powerNames().at(f.group.channels.at(1).power), QString("LOW5"));
+        QCOMPARE(powerNames().at(f.group.channels.at(2).power), QString("LOW3"));
+        QCOMPARE(powerNames().at(f.group.channels.at(3).power), QString("MID"));
+    }
+    void listFileProblemsAreReported() {
+        const PresetFile f = parsePresetCsv(
+            "name,rx,tx,tx_tone,mode\n"
+            "Good,446.00625,,,\n"
+            "Bad freq,abc,,,\n"
+            "Too low,5.0,,,\n"
+            "Bad tx,145.5,zzz,,\n"
+            "Bad tone,145.5,,xyz,\n"
+            "Bad mode,145.5,,,CW\n"
+            "A name that is too long,145.5,,,\n"
+            "Caff\xc3\xa8,145.5,,,\n", "x");
+        QCOMPARE(f.group.channels.size(), 2);
+        QCOMPARE(f.group.name, QString("x"));                            // no "# name:" line: the file name
+        QCOMPARE(f.group.channels.at(1).name, QString("A name tha"));
+        QCOMPARE(f.problems.size(), 7);
+        QVERIFY(f.problems.at(0).startsWith("line 3:"));
+        QVERIFY(f.problems.at(4).contains("FM, AM, USB"));
+        QVERIFY(f.problems.at(5).contains("stored as"));
+        QVERIFY(f.problems.at(6).startsWith("line 9:"));                 // only plain ASCII fits in a name
+        QCOMPARE(parsePresetCsv("145.5,Home\n", "x").group.channels.size(), 0);     // no header row
+        QVERIFY(!parsePresetCsv("145.5,Home\n", "x").problems.isEmpty());
+        QVERIFY(!parsePresetCsv("", "x").problems.isEmpty());
+    }
+    void userListsAddAndReplace() {
+        QTemporaryDir dir;
+        auto write = [&](const char *name, const char *text) {
+            QFile f(dir.filePath(name));
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write(text);
+        };
+        write("pmr446.csv", "# name: My PMR\nname,rx\nOnly one,446.00625\n");
+        write("99-club.csv", "# name: Club\nname,rx,tx\nClub rpt,145.6,145.0\nBroken,nope,\n");
+        write("notes.txt", "not a list");
+        const int before = int(presetGroups().size());
+        int pmrAt = -1;
+        for (int i = 0; i < before; ++i)
+            if (presetGroups().at(i).id == "pmr446") pmrAt = i;
+        QVERIFY(pmrAt >= 0);
+        setPresetDirs({QStringLiteral(K5_LISTS_SOURCE_DIR), dir.path(), dir.filePath("missing")});
+        QCOMPARE(presetGroups().size(), before + 1);
+        QCOMPARE(findPresetGroup("pmr446")->name, QString("My PMR"));   // replaced, same place in the order
+        QCOMPARE(findPresetGroup("pmr446")->channels.size(), 1);
+        QCOMPARE(presetGroups().at(pmrAt).id, QString("pmr446"));
+        QCOMPARE(presetGroups().last().id, QString("club"));
+        QCOMPARE(presetGroups().last().channels.size(), 1);
+        QCOMPARE(presetProblems().size(), 1);
+        QVERIFY(presetProblems().first().startsWith("99-club.csv: line 4:"));
+        setPresetDirs({QStringLiteral(K5_LISTS_SOURCE_DIR)});
+        QCOMPARE(presetGroups().size(), before);
+        QCOMPARE(findPresetGroup("pmr446")->channels.size(), 16);
+    }
+    void italianAirportsAndRepeaters() {
+        int total = 0;
+        for (const char *id : {"air_it_north", "air_it_centre", "air_it_south"}) {
+            const PresetGroup *g = findPresetGroup(id);
+            QVERIFY2(g, id);
+            QVERIFY(presetUsesAirband(*g));
+            total += int(g->channels.size());
+            for (const Channel &c : g->channels) {
+                QCOMPARE(modulationNames().at(c.modulation), QString("AM"));
+                QVERIFY2(c.freq >= 11800000 && c.freq <= 13697500, qPrintable(c.name));
+                QVERIFY2(c.name.startsWith("LI"), qPrintable(c.name));
+            }
+        }
+        QVERIFY(total > 100);
+        QVERIFY(!presetUsesAirband(*findPresetGroup("pmr446")));
+        QVERIFY(presetUsesAirband(*findPresetGroup("distress")));
+
+        int lists = 0;
+        total = 0;
+        for (const PresetGroup &g : presetGroups()) {
+            if (!g.id.startsWith("rpt_it_")) continue;
+            ++lists;
+            total += int(g.channels.size());
+            for (const Channel &c : g.channels) {
+                const quint32 tx = txFrequency(c);
+                const bool vhf = c.freq >= 14400000 && c.freq <= 14600000, uhf = c.freq >= 43000000 && c.freq <= 44000000;
+                QVERIFY2(vhf || uhf, qPrintable(c.name));
+                QVERIFY2(c.shift != 0, qPrintable(c.name));
+                // the input stays inside the same amateur band
+                QVERIFY2(vhf ? tx >= 14400000 && tx <= 14600000 : tx >= 43000000 && tx <= 44000000, qPrintable(c.name));
+                QCOMPARE(modulationNames().at(c.modulation), QString("FM"));
+                QCOMPARE(c.rxToneType, 0);
+            }
+        }
+        QVERIFY(lists >= 15);
+        QVERIFY(total > 300);
+        QVERIFY(findPresetGroup("rpt_it_lazio"));
+    }
+    void importFillsEmptySlotsInOrder() {
+        QByteArray img = fixture("f4hwn_v43.bin");                       // slots 1 to 10 in use
+        const QByteArray before = img;
+        const PresetGroup &g = *findPresetGroup("freenet");
+        const ImportResult r = importPreset(img, g, {});
+        QVERIFY2(r.ok, qPrintable(r.error));
+        QCOMPARE(r.placed, (QList<int>{10, 11, 12, 13, 14, 15}));
+        for (int i = 0; i < 10; ++i) QCOMPARE(decodeChannel(img, i), decodeChannel(before, i));     // existing channels untouched
+        QCOMPARE(decodeChannel(img, 10).name, QString("Freenet 1"));
+        QCOMPARE(decodeChannel(img, 15).name, QString("Freenet 6"));
+        QCOMPARE(decodeChannel(img, 10).scanLists, 0);
+        QVERIFY(channelProblems(img, 10).isEmpty());
+        QVERIFY(decodeChannel(img, 16).empty);
+        // only channel memory, attributes and names change
+        QCOMPARE(img.mid(0x0e70, 0x0d60 - 0x0e70 + 0x1f0), before.mid(0x0e70, 0x0d60 - 0x0e70 + 0x1f0));
+        QCOMPARE(img.mid(0x1d00), before.mid(0x1d00));
+        // a start slot in the middle skips used slots, and the channels can go into a scan list
+        ImportOptions o;
+        o.firstSlot = 13;
+        o.scanList = 3;
+        const ImportResult r2 = importPreset(img, g, o);
+        QVERIFY(r2.ok);
+        QCOMPARE(r2.placed, (QList<int>{16, 17, 18, 19, 20, 21}));
+        QCOMPARE(decodeChannel(img, 16).scanLists, 4);
+        QCOMPARE(decodeChannel(img, 10).scanLists, 0);
+    }
+    void importLocksTransmitOnTheAirBand() {
+        const PresetGroup &g = *findPresetGroup("distress");            // two air band and two marine channels
+        QByteArray img = fixture("f4hwn_v43.bin");
+        ImportResult r = importPreset(img, g, {});
+        QVERIFY(r.ok);
+        int locked = 0;
+        for (int s : r.placed) {
+            const Channel c = decodeChannel(img, s);
+            QCOMPARE(c.txLock, isAirband(c));
+            locked += c.txLock;
+        }
+        QCOMPARE(locked, 2);
+        img = fixture("f4hwn_v43.bin");
+        ImportOptions o;
+        o.lockAirband = false;
+        r = importPreset(img, g, o);
+        for (int s : r.placed) QVERIFY(!decodeChannel(img, s).txLock);
+    }
+    void importIsAllOrNothing() {
+        QByteArray img = fixture("f4hwn_v43.bin");
+        const QByteArray before = img;
+        QCOMPARE(freeSlotsFrom(img, 0), 190);
+        QCOMPARE(freeSlotsFrom(img, 180), 20);
+        ImportOptions o;
+        o.firstSlot = 180;
+        const ImportResult r = importPreset(img, *findPresetGroup("cb_fm"), o);
+        QVERIFY(!r.ok);
+        QVERIFY(r.error.contains("40"));
+        QCOMPARE(img, before);
+        o.firstSlot = 500;
+        QVERIFY(!importPreset(img, *findPresetGroup("cb_fm"), o).ok);
+        QByteArray small = img.left(100);
+        QVERIFY(!importPreset(small, *findPresetGroup("freenet"), {}).ok);
+        QCOMPARE(img, before);
     }
 
     // ---- settings

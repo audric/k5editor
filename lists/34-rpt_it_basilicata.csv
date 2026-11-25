@@ -1,0 +1,12 @@
+# name: RPT Basilicata
+# note: Amateur FM repeaters in Basilicata (2 m and 70 cm, with shift and access tone). Amateur licence needed to transmit.
+name,rx,tx,tx_tone,rx_tone,mode,width,power
+R0 M.Pierf,145.60000,145.00000,110.9,,FM,Wide,HIGH
+R1 M.Vultu,145.62500,145.02500,110.9,,FM,Wide,HIGH
+R2 M.Vultu,145.65000,145.05000,88.5,,FM,Wide,HIGH
+R3 Stiglia,145.67500,145.07500,136.5,,FM,Wide,HIGH
+R3a M.Pier,145.68750,145.08750,110.9,,FM,Narrow,HIGH
+R6a Lauria,145.76250,145.16250,110.9,,FM,Narrow,HIGH
+RU1 M.Pier,430.02500,431.62500,110.9,,FM,Wide,HIGH
+RU3a M.Pie,430.08750,431.68750,110.9,,FM,Narrow,HIGH
+RU17 M.Vol,431.25000,432.85000,88.5,,FM,Wide,HIGH
