@@ -6,13 +6,28 @@
 #include <QFile>
 #include <QTextStream>
 #include <QTimer>
+#ifdef Q_OS_WIN
+#include <cstdio>
+#include <windows.h>
+
+// A Windows program with a window has no console; --dump borrows the one it was started from.
+static void useParentConsole() {
+    if (!AttachConsole(ATTACH_PARENT_PROCESS)) return;
+    if (_fileno(stdout) < 0) freopen("CONOUT$", "w", stdout);
+    if (_fileno(stderr) < 0) freopen("CONOUT$", "w", stderr);
+}
+#else
+static void useParentConsole() {}
+#endif
 
 // k5editor                         start the editor
 // k5editor <image.bin>             open an image file
 // k5editor --dump <port> <file>    read the radio's memory to a file, no window
 int main(int argc, char **argv) {
+    const bool dump = argc == 4 && QString::fromLocal8Bit(argv[1]) == QLatin1String("--dump");
+    if (dump) useParentConsole();
     QTextStream out(stdout), err(stderr);
-    if (argc == 4 && QString::fromLocal8Bit(argv[1]) == QLatin1String("--dump")) {
+    if (dump) {
         try {
             k5::SerialTransport transport(QString::fromLocal8Bit(argv[2]));
             k5::Radio radio(transport);
@@ -35,8 +50,8 @@ int main(int argc, char **argv) {
     QCoreApplication::setOrganizationName(QStringLiteral("k5editor"));
     QCoreApplication::setApplicationName(QStringLiteral("k5editor"));
     {
-        // Shipped lists: next to an installed binary, else the source tree this was built from.
-        QString shipped = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("../" K5_LISTS_INSTALL_DIR));
+        // Shipped lists: where the package puts them, else the source tree this was built from.
+        QString shipped = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral(K5_LISTS_FROM_BINARY));
         if (!QDir(shipped).exists()) shipped = QStringLiteral(K5_LISTS_SOURCE_DIR);
         k5::setPresetDirs({QDir::cleanPath(shipped), MainWindow::userListsDir()});
     }
