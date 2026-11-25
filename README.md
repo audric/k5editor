@@ -54,22 +54,22 @@ Other firmwares can be read and saved to a file as a backup, but not edited or w
 
 ## Install
 
-Current release: **v0.1.0** ([all releases](https://github.com/audric/k5editor/releases)).
+Current release: **v0.2.0** ([all releases](https://github.com/audric/k5editor/releases)).
 Packages are built by GitHub for PCs (`amd64`) and for Raspberry Pi (`arm64`, 64-bit
 Raspberry Pi OS). They need Debian 12, Raspberry Pi OS Bookworm, Ubuntu 24.04, or newer.
 
 On a PC:
 
 ```sh
-wget https://github.com/audric/k5editor/releases/download/v0.1.0/k5editor_0.1.0_amd64.deb
-sudo apt install ./k5editor_0.1.0_amd64.deb
+wget https://github.com/audric/k5editor/releases/download/v0.2.0/k5editor_0.2.0_amd64.deb
+sudo apt install ./k5editor_0.2.0_amd64.deb
 ```
 
 On a Raspberry Pi:
 
 ```sh
-wget https://github.com/audric/k5editor/releases/download/v0.1.0/k5editor_0.1.0_arm64.deb
-sudo apt install ./k5editor_0.1.0_arm64.deb
+wget https://github.com/audric/k5editor/releases/download/v0.2.0/k5editor_0.2.0_arm64.deb
+sudo apt install ./k5editor_0.2.0_arm64.deb
 ```
 
 Then start **K5 Editor** from the applications menu, or run `k5editor`. `apt` installs

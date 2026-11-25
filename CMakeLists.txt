@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-set(K5_VERSION "0.1.0" CACHE STRING "Version of this build (release builds pass the tag)")
+set(K5_VERSION "0.2.0" CACHE STRING "Version of this build (release builds pass the tag)")
 project(k5editor VERSION ${K5_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
