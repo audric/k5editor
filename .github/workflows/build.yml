@@ -1,7 +1,7 @@
 name: build
 
-# Every push and pull request is built and tested on both architectures.
-# Pushing a tag like v0.1.0 also publishes a release with the packages.
+# Every push and pull request is built and tested on Linux (both architectures) and
+# on Windows. Pushing a tag like v0.1.0 also publishes a release with the packages.
 on:
   push:
     branches: [main]
@@ -63,10 +63,80 @@ jobs:
             build/*.tar.gz
           if-no-files-found: error
 
+  windows:
+    name: windows
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      # Qt's own build for MinGW, and the compiler it was built with.
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_mingw
+          tools: tools_mingw1310
+          cache: true
+
+      - name: Put the compiler and Qt first on the path
+        run: |
+          cygpath -w "$IQTA_TOOLS/mingw1310_64/bin" >> "$GITHUB_PATH"
+          cygpath -w "$QT_ROOT_DIR/bin" >> "$GITHUB_PATH"
+
+      - name: Configure
+        run: |
+          args=(-S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+                "-DCMAKE_CXX_COMPILER=$(cygpath -m "$IQTA_TOOLS/mingw1310_64/bin/g++.exe")")
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then args+=("-DK5_VERSION=${GITHUB_REF_NAME#v}"); fi
+          cmake "${args[@]}"
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Package
+        working-directory: build
+        run: |
+          cpack -G ZIP
+          ls -l *.zip
+
+      # The unpacked zip must start on a PC that has neither Qt nor a compiler.
+      - name: Try the package
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          Expand-Archive (Get-Item build\k5editor-*-windows-x64.zip) -DestinationPath smoke
+          $exe = (Get-Item smoke\*\k5editor.exe).FullName
+          Get-ChildItem (Split-Path $exe) | Format-Table Name, Length
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          $shot = Join-Path $PWD 'smoke\window.png'
+          $p = Start-Process $exe -ArgumentList '--new', '--import', '--screenshot', "`"$shot`"" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "the editor exited with $($p.ExitCode)" }
+          if (!(Test-Path $shot)) { throw 'the editor did not draw its window' }
+          $p = Start-Process $exe -ArgumentList '--dump', 'COM250', 'none.bin' -Wait -PassThru
+          if ($p.ExitCode -ne 1) { throw "reading a missing port exited with $($p.ExitCode)" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: k5editor-windows-x64
+          path: build/*.zip
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: check-windows-window
+          path: smoke/window.png
+
   release:
     name: publish release
     if: github.ref_type == 'tag'
-    needs: build
+    needs: [build, windows]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -74,6 +144,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
+          pattern: k5editor-*
           merge-multiple: true
 
       - name: Create release

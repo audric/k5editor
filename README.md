@@ -3,7 +3,7 @@
 [![build](https://github.com/audric/k5editor/actions/workflows/build.yml/badge.svg)](https://github.com/audric/k5editor/actions/workflows/build.yml)
 
 A desktop editor for the memory channels and settings of a Quansheng UV-K5 handheld
-running the **F4HWN v4.3** firmware. C++20 and Qt 6, Linux.
+running the **F4HWN v4.3** firmware. C++20 and Qt 6, for Linux and Windows.
 
 ![K5 Editor showing the channel table](docs/screenshot.png)
 
@@ -23,8 +23,9 @@ running the **F4HWN v4.3** firmware. C++20 and Qt 6, Linux.
 - Adds Italian amateur FM repeaters, one list per region (2 m and 70 cm, with shift and
   access tone), and the amateur FM satellites and ISS with Doppler steps.
 - The lists are plain CSV files in [`lists/`](lists/README.md). Keep your own in
-  `~/.local/share/k5editor/lists/` (*Open my lists folder* in the dialog): a new file adds
-  a list, a file named like a shipped one replaces it.
+  `~/.local/share/k5editor/lists/`, or `%LOCALAPPDATA%\k5editor\lists\` on Windows
+  (*Open my lists folder* in the dialog): a new file adds a list, a file named like a
+  shipped one replaces it.
 - Flags channels whose stored data looks damaged or was left by another firmware.
 - Opens and saves 8 KiB memory images, and starts new ones with no channels and default
   settings (*File → New*).
@@ -48,28 +49,32 @@ running the **F4HWN v4.3** firmware. C++20 and Qt 6, Linux.
 |---|---|
 | Radio | Quansheng UV-K5 / UV-K5(8) / UV-K6 with the DP32G030 chip |
 | Firmware | F4HWN v4.3 (any edition) |
-| System | Linux |
+| System | Linux, or Windows 10 / 11 (64-bit) |
 
 Other firmwares can be read and saved to a file as a backup, but not edited or written.
 
 ## Install
 
-Current release: **v0.2.0** ([all releases](https://github.com/audric/k5editor/releases)).
-Packages are built by GitHub for PCs (`amd64`) and for Raspberry Pi (`arm64`, 64-bit
-Raspberry Pi OS). They need Debian 12, Raspberry Pi OS Bookworm, Ubuntu 24.04, or newer.
+Current release: **v0.3.0** ([all releases](https://github.com/audric/k5editor/releases)).
+The packages are built by GitHub.
+
+### Linux
+
+There are packages for PCs (`amd64`) and for Raspberry Pi (`arm64`, 64-bit Raspberry
+Pi OS). They need Debian 12, Raspberry Pi OS Bookworm, Ubuntu 24.04, or newer.
 
 On a PC:
 
 ```sh
-wget https://github.com/audric/k5editor/releases/download/v0.2.0/k5editor_0.2.0_amd64.deb
-sudo apt install ./k5editor_0.2.0_amd64.deb
+wget https://github.com/audric/k5editor/releases/download/v0.3.0/k5editor_0.3.0_amd64.deb
+sudo apt install ./k5editor_0.3.0_amd64.deb
 ```
 
 On a Raspberry Pi:
 
 ```sh
-wget https://github.com/audric/k5editor/releases/download/v0.2.0/k5editor_0.2.0_arm64.deb
-sudo apt install ./k5editor_0.2.0_arm64.deb
+wget https://github.com/audric/k5editor/releases/download/v0.3.0/k5editor_0.3.0_arm64.deb
+sudo apt install ./k5editor_0.3.0_arm64.deb
 ```
 
 Then start **K5 Editor** from the applications menu, or run `k5editor`. `apt` installs
@@ -77,6 +82,21 @@ the Qt 6 libraries it needs.
 
 Each release also has a `.tar.gz` per architecture with the same program and no
 installer; it needs the Qt 6 libraries (`libqt6widgets6`) already installed.
+
+Your user needs access to the serial port, usually by being in the `dialout` group.
+
+### Windows
+
+Download
+[`k5editor-0.3.0-windows-x64.zip`](https://github.com/audric/k5editor/releases/download/v0.3.0/k5editor-0.3.0-windows-x64.zip),
+unpack it anywhere and start `k5editor.exe` from the unpacked folder. There is no
+installer, and the folder already holds the Qt libraries.
+
+The program is not signed, so Windows may show a "Windows protected your PC" notice the
+first time: choose *More info*, then *Run anyway*.
+
+The programming cable shows up as a `COM` port. If none is listed, install the driver
+for the cable's USB chip (CH340 on most cables).
 
 ## Build
 
@@ -92,7 +112,8 @@ ctest --test-dir build        # optional: runs the core tests
 
 To make the packages yourself: `cd build && cpack -G "DEB;TGZ"`.
 
-Your user needs access to the serial port, usually by being in the `dialout` group.
+On Windows, install Qt 6 for MinGW with the Qt installer, run the same `cmake`
+commands from the Qt command prompt, and make the zip with `cd build && cpack -G ZIP`.
 
 ## Use
 
@@ -102,7 +123,8 @@ Your user needs access to the serial port, usually by being in the `dialout` gro
    200 channels, so pick the lists you need.
 3. Press **Write to radio**. The program lists the changes and asks before sending them.
 
-Backups go to `~/.local/share/k5editor/backups`; change that under
+Backups go to `~/.local/share/k5editor/backups`, or
+`%LOCALAPPDATA%\k5editor\k5editor\backups` on Windows; change that under
 *File → Choose backup folder*.
 
 Command line:
@@ -110,6 +132,7 @@ Command line:
 ```sh
 k5editor image.bin                     # open an image file
 k5editor --dump /dev/ttyUSB0 out.bin   # read the radio to a file, without a window
+k5editor --dump COM3 out.bin           # the same on Windows
 ```
 
 ## Not included
@@ -124,8 +147,9 @@ The core (packet format, memory layout, write planning and the write procedure) 
 covered by automated tests that run against a simulated radio. Reading has been checked
 against a real UV-K5 on F4HWN v4.3.
 
-Release packages are built and tested by GitHub on both architectures. The `arm64`
-package has not yet been tried on an actual Raspberry Pi.
+Release packages are built and tested by GitHub for Linux on both architectures and
+for Windows. The `arm64` package has not yet been tried on an actual Raspberry Pi, and
+the Windows package has not yet been tried with a real radio.
 
 Use it at your own risk: it writes to your radio's memory. Keep the first backup it
 makes; that file also contains your radio's calibration.

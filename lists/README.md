@@ -3,7 +3,8 @@
 Each `.csv` file here is one list offered by *Channels → Add ready-made channel lists…*.
 
 To keep your own lists, put `.csv` files in your personal folder,
-`~/.local/share/k5editor/lists/` (the dialog has a button that opens it):
+`~/.local/share/k5editor/lists/`, or `%LOCALAPPDATA%\k5editor\lists\` on Windows
+(the dialog has a button that opens it):
 
 - a file with a new name adds a list;
 - a file with the same name as one here replaces that list (copy it and edit the copy);
